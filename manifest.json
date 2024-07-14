@@ -1,0 +1,10 @@
+{
+    "domain": "byd_hv_box",
+    "name": "BYD HV BOX",
+    "version": "0.1",
+    "documentation": "https://github.com/kai-schmid/byd_hv_box",
+    "dependencies": [],
+    "codeowners": "Kilian Knoll",
+    "requirements": ["requests", "beautifulsoup4"]
+  }
+  
