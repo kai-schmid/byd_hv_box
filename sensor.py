@@ -4,31 +4,34 @@ from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.helpers.entity import Entity
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "byd_hv_box"
+
 SENSOR_TYPES = {
-    "arrayvoltage": ["Array Voltage", "V"],
-    "packvoltage": ["Pack Voltage", "V"],
-    "current": ["Current", "A"],
-    "soc": ["State of Charge", "%"],
-    "sysTemp": ["System Temperature", "°C"],
-    "maxcellvol": ["Max Cell Voltage", "V"],
-    "mincellvol": ["Min Cell Voltage", "V"],
-    "maxcelltemp": ["Max Cell Temperature", "°C"],
-    "mincelltemp": ["Min Cell Temperature", "°C"],
-    "maxvolpos": ["Max Voltage Position", ""],
-    "minvolpos": ["Min Voltage Position", ""],
-    "maxtemppos": ["Max Temperature Position", ""],
-    "mintemppos": ["Min Temperature Position", ""],
-    "power": ["Power", "W"],
-    "Total_Charge_Energy": ["Total Charge Energy", "kWh"],
-    "Total_Discharge_Energy": ["Total Discharge Energy", "kWh"],
-    "Total_Cycle_Counts": ["Total Cycle Counts", ""]
+    "arrayvoltage": ["BYD Array Voltage", "V", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT],
+    "packvoltage": ["BYD Pack Voltage", "V", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT],
+    "current": ["BYD Current", "A", SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT],
+    "soc": ["BYD State of Charge", "%", None, SensorStateClass.MEASUREMENT],
+    "sysTemp": ["BYD System Temperature", "°C", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT],
+    "maxcellvol": ["BYD Max Cell Voltage", "V", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT],
+    "mincellvol": ["BYD Min Cell Voltage", "V", SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT],
+    "maxcelltemp": ["BYD Max Cell Temperature", "°C", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT],
+    "mincelltemp": ["BYD Min Cell Temperature", "°C", SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT],
+    "maxvolpos": ["BYD Max Voltage Position", "V", None, SensorStateClass.MEASUREMENT],
+    "minvolpos": ["BYD Min Voltage Position", "V", None, SensorStateClass.MEASUREMENT],
+    "maxtemppos": ["BYD Max Temperature Position", "°C", None, SensorStateClass.MEASUREMENT],
+    "mintemppos": ["BYD Min Temperature Position", "°C", None, SensorStateClass.MEASUREMENT],
+    "power": ["BYD Power", "W", SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT],
+    "Total_Charge_Energy": ["BYD Total Charge Energy", "kWh", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING],
+    "Total_Discharge_Energy": ["BYD Total Discharge Energy", "kWh", SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING],
+    "Total_Cycle_Counts": ["BYD Total Cycle Counts", "", None, SensorStateClass.MEASUREMENT]
 }
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the BYD HV BOX sensor."""
     host = config.get(CONF_HOST)
     username = config.get(CONF_USERNAME)
@@ -38,7 +41,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     for sensor_type in SENSOR_TYPES:
         sensors.append(BydHvBoxSensor(host, username, password, sensor_type))
 
-    add_entities(sensors, True)
+    async_add_entities(sensors, True)
 
 class BydHvBoxSensor(SensorEntity):
     """Representation of a BYD HV BOX sensor."""
@@ -51,6 +54,9 @@ class BydHvBoxSensor(SensorEntity):
         self.type = sensor_type
         self._name = SENSOR_TYPES[sensor_type][0]
         self._unit_of_measurement = SENSOR_TYPES[sensor_type][1]
+        self._device_class = SENSOR_TYPES[sensor_type][2]
+        self._state_class = SENSOR_TYPES[sensor_type][3]
+        self._unique_id = f"{host}_{sensor_type}"
         self._state = None
         self._data = {}
 
@@ -68,6 +74,21 @@ class BydHvBoxSensor(SensorEntity):
     def unit_of_measurement(self):
         """Return the unit of measurement of the sensor."""
         return self._unit_of_measurement
+
+    @property
+    def device_class(self):
+        """Return the device class of the sensor."""
+        return self._device_class
+
+    @property
+    def state_class(self):
+        """Return the state class of the sensor."""
+        return self._state_class
+
+    @property
+    def unique_id(self):
+        """Return a unique ID for the sensor."""
+        return self._unique_id
 
     def update(self):
         """Fetch new state data for the sensor."""
