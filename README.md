@@ -39,6 +39,7 @@ Add the following configuration to your `configuration.yaml` file:
 sensor:
   - platform: byd_hv_box
     host: YOUR_BYD_BOX_IP
+    cell_voltages: true
     username: YOUR_USERNAME
     password: YOUR_PASSWORD
 ```
