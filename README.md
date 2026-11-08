@@ -1,80 +1,60 @@
-# BYD HV BOX Home Assistant Integration
+# BYD Battery-Box HV for Home Assistant
 
-This Home Assistant custom component allows you to integrate your BYD HV BOX into Home Assistant, enabling you to monitor various parameters such as voltage, current, state of charge, and more.
+Monitor a legacy BYD Battery-Box HV from Home Assistant using the battery’s local web interface. The integration provides 17 standard sensors and can optionally expose the voltage of each cell as a separate sensor.
 
-## Original Author
+## Features
 
-This component is based on the original code by Kilian Knoll. The original script can be found [here](https://www.photovoltaikforum.com/thread/129771-byd-batteriespeicher-daten-programmatisch-auslesen/).
+- **Shared polling** — One Home Assistant data coordinator refreshes the standard readings every 60 seconds. All sensors share the results. Network requests run in the background with connection and read timeouts.
+- **Optional per-cell voltages** — Enable `cell_voltages` to discover the module and cell numbers reported by the battery. The integration creates one voltage sensor per discovered cell, so the number of sensors follows the installed configuration.
+- **Power in watts** — The integration reads the unit reported by the battery and converts kilowatts to watts when needed. If the reported power has no recognized unit, it uses pack voltage multiplied by current when both readings are available.
+- **Display precision** — Voltage, current, and energy sensors default to three decimal places. Home Assistant’s per-entity display settings take precedence.
+
+Tested on a legacy BYD Battery-Box HV 10.2 running firmware **V3.013C**. With eight B-Plus H 1.28 modules, the integration exposed **128 individual cell voltages**.
 
 ## Installation
 
-### Step 1: Download the Custom Component
-
-1. Download the custom component files and place them in your Home Assistant configuration directory under `custom_components/byd_hv_box/`.
-
-### Step 2: Directory Structure
-
-Ensure your directory structure looks like this:  
-```
-homeassistant/  
-|-- custom_components/
-|--|-- byd_hv_box/
-|--|-- init.py
-|--|-- manifest.json
-|--|-- sensor.py
-```
-Replace YOUR_BYD_BOX_IP, YOUR_USERNAME, and YOUR_PASSWORD with your actual BYD HV BOX IP address, username, and password.
-### Step 4: Restart Home Assistant
-
-Restart your Home Assistant instance to load the new custom component.
-Sensor Entities
-
-Configuration in configuration.yaml:
-
-### Step 3: Configuration
-
-Add the following configuration to your `configuration.yaml` file:
+1. Copy `__init__.py`, `manifest.json`, and `sensor.py` into the `custom_components/byd_hv_box/` directory under your Home Assistant configuration directory.
+2. Add the following entry to your existing `sensor:` configuration. Replace the placeholders with your battery’s local address and web interface credentials.
+3. Restart Home Assistant to load the integration.
 
 ```yaml
 sensor:
   - platform: byd_hv_box
     host: YOUR_BYD_BOX_IP
-    cell_voltages: true
     username: YOUR_USERNAME
     password: YOUR_PASSWORD
+    cell_voltages: true
 ```
 
+`cell_voltages` defaults to `false`. Set it to `true` to enable per-cell monitoring. Existing installations can keep their current `host`, `username`, and `password` values.
 
-The component will create sensor entities for the following parameters:
+## Sensors
 
-    Array Voltage (V)
-    Pack Voltage (V)
-    Current (A)
-    State of Charge (%)
-    System Temperature (°C)
-    Max Cell Voltage (V)
-    Min Cell Voltage (V)
-    Max Cell Temperature (°C)
-    Min Cell Temperature (°C)
-    Max Voltage Position
-    Min Voltage Position
-    Max Temperature Position
-    Min Temperature Position
-    Power (W)
-    Total Charge Energy (kWh)
-    Total Discharge Energy (kWh)
-    Total Cycle Counts
+| Group | Readings |
+| --- | --- |
+| Electrical | Array voltage, pack voltage, current, power, and state of charge |
+| Temperature | System temperature and minimum and maximum cell temperatures |
+| Cell extremes | Minimum and maximum cell voltages, plus the reported positions of the voltage and temperature extremes |
+| Lifetime totals | Total charge energy, total discharge energy, and total cycle count |
+| Optional cell monitoring | Individual cell voltages, identified by array, module, and cell number |
 
-# Troubleshooting
+An example cell entity ID is `sensor.byd_hv_array_01_module_07_cell_01_voltage`. Home Assistant keeps the registered entity IDs for existing sensors when their unique IDs stay the same.
 
-If you encounter issues or errors, check the Home Assistant logs for more details. Make sure the BYD HV BOX is accessible from the network and that the provided credentials are correct.
-License
+## How cell monitoring works
 
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+The **Run Data** page exposes the cell voltages for one selected module at a time. When cell monitoring is enabled, the integration steps through the modules in the currently selected array, checks that each response matches the requested module, and attempts to restore the original selection after the refresh. This adds network requests and can briefly change the module displayed in the battery’s web interface.
 
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+## Troubleshooting
 
-You should have received a copy of the GNU General Public License along with this program. If not, see http://www.gnu.org/licenses/.
-# Disclaimer
+- **No BYD readings** — Check that Home Assistant can reach the battery’s web interface. Check the Home Assistant logs for timeouts or HTTP errors. An HTTP 401 means the battery rejected the request’s authentication.
+- **Only one module’s cells appear** — Check the logs for module selection errors. The integration can read the currently displayed module directly. Reading the other modules requires the firmware to accept the module selection request.
+- **Cell values look rounded** — Check the entity’s display precision in Home Assistant. An explicit setting there overrides the integration’s default.
+- **Changes do not appear after replacing `sensor.py`** — Restart Home Assistant to load the updated Python code.
 
-Please note that any incorrect or careless usage of this module as well as errors in the implementation can damage your BYD box! Therefore, the author does not provide any guarantee or warranty concerning to correctness, functionality or performance and does not accept any liability for damage caused by this module, examples or mentioned information. Thus, use it at your own risk!
+## Credits
+
+This integration is based on [Kilian Knoll’s original script](https://www.photovoltaikforum.com/thread/129771-byd-batteriespeicher-daten-programmatisch-auslesen/).
+
+## License and disclaimer
+
+This project is licensed under the GNU General Public License, version 3 or, at your option, any later version. See [LICENSE](LICENSE) for the full terms. The software is provided without warranty. Use it at your own risk.
