@@ -43,7 +43,7 @@ RUN_PAGE = "RunData.asp"
 STATISTICS_PAGE = "StatisticInformation.asp"
 CONF_CELL_VOLTAGES = "cell_voltages"
 CELL_DATA = CONF_CELL_VOLTAGES
-CELL_LABEL = re.compile(r"CellVol\[([1-9][0-9]*)\]:?", re.I)
+CELL_LABEL = re.compile(r"(CellVol|CellTemp)\[([1-9][0-9]*)\]:?", re.I)
 
 PLATFORM_SCHEMA = SENSOR_PLATFORM_SCHEMA.extend(
     {
@@ -201,37 +201,79 @@ def _selection(form, name):
     return selected["value"] if selected is not None else None, values
 
 
+MODULE_FIELDS = {
+    "battvol": "voltage",
+    "cellvoldiff": "cell_voltage_delta",
+    "serialnumber": "serial_number",
+}
+
+
+def _balance_readings(cell):
+    """Expose the checkbox states using the cell numbers shown by the BMS."""
+    readings = {}
+    for field in cell.find_all("input", attrs={"type": "checkbox"}):
+        match = re.fullmatch(r"\s*([1-9][0-9]*)\s*:\s*", str(field.previous_sibling))
+        if match is not None:
+            key = f"cell_{int(match[1]):02d}_balance_ctrl"
+            readings[key] = "checked" if field.has_attr("checked") else "unchecked"
+    return readings
+
+
 def _module_data(html):
-    """Read the displayed module ID, available module IDs and cell voltages."""
+    """Read the selected module, available module IDs and module measurements."""
     soup = BeautifulSoup(html, "html.parser")
     form = soup.find("form", id="RunData", action="/goform/SetRunData")
     if form is None:
         return None, None, [], {}
     array, _ = _selection(form, "ArrayNum")
     module, modules = _selection(form, "SeriesBatteryNum")
-    cells = {}
+    readings = {}
     for cell in form.find_all("td"):
-        match = CELL_LABEL.fullmatch(cell.get_text(" ", strip=True))
-        if match is None:
+        label = cell.get_text(" ", strip=True)
+        field_label = _label(label)
+        if field_label == "balancectrl":
+            if value_cell := cell.find_next_sibling("td"):
+                readings.update(_balance_readings(value_cell))
+            continue
+        key = MODULE_FIELDS.get(field_label)
+        description = RUN_FIELDS["maxcellvol"]
+        if match := CELL_LABEL.fullmatch(label):
+            index = int(match[2])
+            if match[1].lower() == "celltemp":
+                key = f"temperature_sensor_{index:02d}"
+                description = RUN_FIELDS["maxcelltemp"]
+            else:
+                key = f"cell_{index:02d}_voltage"
+        if key is None:
             continue
         value_cell = cell.find_next_sibling("td")
         field = value_cell.find("input", attrs={"type": "text"}) if value_cell else None
         if field is None:
             continue
-        value = _number(
-            field.get("value", ""), RUN_FIELDS["maxcellvol"],
-            value_cell.get_text(" ", strip=True),
-        )
+        raw = field.get("value", "")
+        if key == "serial_number":
+            parts = raw.split(maxsplit=1)
+            if parts:
+                readings[key] = parts[0]
+            continue
+        value = _number(raw, description, value_cell.get_text(" ", strip=True))
         if value is not None:
-            cells[int(match[1])] = value
-    return array, module, modules, cells
+            readings[key] = value
+    return array, module, modules, readings
 
 
-def _cell_values(array, module, cells):
-    return {
-        f"array_{int(array):02d}_module_{int(module):02d}_cell_{cell:02d}_voltage": value
-        for cell, value in cells.items()
-    }
+def _module_values(array, module, readings):
+    prefix = f"array_{int(array):02d}_module_{int(module):02d}"
+    return {f"{prefix}_{key}": value for key, value in readings.items()}
+
+
+def _module_sensor(key):
+    name = key.replace("_", " ").title()
+    if key.endswith(("_serial_number", "_balance_ctrl")):
+        return _sensor(key, name, state_class=None)
+    if "_temperature_sensor_" in key:
+        return _sensor(key, name, UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE)
+    return _sensor(key, name, UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE)
 
 
 def _parse_statistics(html):
@@ -250,7 +292,7 @@ def _parse_statistics(html):
     return data
 
 
-class BydCoordinator(DataUpdateCoordinator[dict[str, dict[str, float | int]]]):
+class BydCoordinator(DataUpdateCoordinator[dict[str, dict[str, float | int | str]]]):
     """Share one refresh of the system and optional cell readings."""
 
     def __init__(self, hass, host, username, password, add_cell_entities=None):
@@ -283,28 +325,28 @@ class BydCoordinator(DataUpdateCoordinator[dict[str, dict[str, float | int]]]):
             )
         if response.status_code != 200:
             raise UpdateFailed(f"HTTP {response.status_code} beim Auswählen von Modul {module}")
-        actual_array, actual_module, _, cells = _module_data(response.text)
+        actual_array, actual_module, _, readings = _module_data(response.text)
         if (actual_array, actual_module) != (array, module):
             raise UpdateFailed(f"Antwort bestätigt Modul {module} in Array {array} nicht")
-        return cells
+        return readings
 
     def _read_cells(self, session, html, errors):
-        array, selected, modules, cells = _module_data(html)
+        array, selected, modules, readings = _module_data(html)
         if array is None or selected is None:
             errors[CELL_DATA] = "Keine unterstützte Modulauswahl in Run Data gefunden"
             return {}
 
-        values = _cell_values(array, selected, cells)
+        values = _module_values(array, selected, readings)
         attempted_selection = False
         try:
             for module in modules:
                 if module == selected:
                     continue
                 attempted_selection = True
-                cells = self._select_module(session, array, module)
-                if not cells:
-                    raise UpdateFailed(f"Modul {module} liefert keine Zellspannungen")
-                values.update(_cell_values(array, module, cells))
+                readings = self._select_module(session, array, module)
+                if not readings:
+                    raise UpdateFailed(f"Modul {module} liefert keine Modulmesswerte")
+                values.update(_module_values(array, module, readings))
         except (requests.RequestException, UpdateFailed) as err:
             errors[CELL_DATA] = str(err) if isinstance(err, UpdateFailed) else type(err).__name__
         finally:
@@ -315,7 +357,7 @@ class BydCoordinator(DataUpdateCoordinator[dict[str, dict[str, float | int]]]):
                     detail = str(err) if isinstance(err, UpdateFailed) else type(err).__name__
                     errors["Modulauswahl"] = f"Ausgangsauswahl konnte nicht bestätigt werden ({detail})"
         if not values:
-            errors.setdefault(CELL_DATA, "Keine Zellspannungen gefunden")
+            errors.setdefault(CELL_DATA, "Keine Modulmesswerte gefunden")
         return values
 
     def _read_pages(self):
@@ -396,8 +438,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         async_add_entities(
             BydHvBoxSensor(
                 coordinator, host, CELL_DATA,
-                _sensor(key, key.replace("_", " ").title(), UnitOfElectricPotential.VOLT,
-                        SensorDeviceClass.VOLTAGE),
+                _module_sensor(key),
             )
             for key in keys
         )
